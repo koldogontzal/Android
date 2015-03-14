@@ -1,0 +1,436 @@
+package com.dummies.androidgame.crazyeights;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Random;
+import android.app.Dialog;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.Window;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.Spinner;
+import android.widget.TextView;
+import android.widget.Toast;
+
+public class GameView extends View {
+
+	private int screenW;
+	private int screenH;
+	private Context myContext;
+	private List<Card> deck = new ArrayList<Card>();
+	private int scaledCardW;
+	private int scaledCardH;
+	private Paint whitePaint;
+	private List<Card> myHand = new ArrayList<Card>();
+	private List<Card> oppHand = new ArrayList<Card>();
+	private int myScore = 0;
+	private int oppScore = 0;
+	private float scale;
+	private Bitmap cardBack;
+	private List<Card> discardPile = new ArrayList<Card>();
+	private boolean myTurn;
+	private ComputerPlayer computerPlayer = new ComputerPlayer();
+	private int movingCardIdx = -1;
+	private int movingX;
+	private int movingY;
+	private int validRank = 8;
+	private int validSuit = 0;
+	private Bitmap nextCardButton;
+	private int scoreThisHand = 0;
+
+	public GameView(Context context) {
+		super(context);
+		this.myContext = context;
+		
+		// Prepara un Paint para el texto. El texto se ve igual en cualquier
+		// dispositivo, tiene siempre el mismo tamaño aparente ya que se elige
+		// su tamaño en función de la densidad de pantalla (scale)
+		this.scale = myContext.getResources().getDisplayMetrics().density;
+		this.whitePaint = new Paint();
+		this.whitePaint.setAntiAlias(true);
+		this.whitePaint.setColor(Color.WHITE);
+		this.whitePaint.setStyle(Paint.Style.STROKE);
+		this.whitePaint.setTextAlign(Paint.Align.LEFT);
+		this.whitePaint.setTextSize(this.scale * 15);
+	}
+
+	@Override
+	public void onSizeChanged(int w, int h, int oldw, int oldh) {
+		super.onSizeChanged(w, h, oldw, oldh);
+		this.screenW = w;
+		this.screenH = h;
+		
+		// Calcula el reverso de las cartas
+		Bitmap tempBitmap = BitmapFactory.decodeResource(
+				this.myContext.getResources(), R.drawable.card_back);
+		this.scaledCardW = (int) (this.screenW / 8);
+		this.scaledCardH = (int) (this.scaledCardW * 1.28);
+		this.cardBack = Bitmap.createScaledBitmap(tempBitmap, this.scaledCardW,
+				this.scaledCardH, false);
+		
+		// Calcula el botón de pasar a la siguiente carta cuando hay más de 7 en la mano
+		this.nextCardButton = BitmapFactory.decodeResource(super.getResources(),
+				R.drawable.arrow_next);
+		
+		// Inicializa el mazo de cartas
+		this.initCards();
+		
+		// Baraja las cartas del mazo y reparte a los 2 jugadores
+		this.dealCards();
+		
+		// Extrae una carta para el centro
+		this.drawCard(this.discardPile);
+		
+		this.validSuit = this.discardPile.get(0).getSuit();
+		this.validRank = this.discardPile.get(0).getRank();
+		this.myTurn = new Random().nextBoolean();
+		if (!this.myTurn) {
+			this.makeComputerPlay();
+		}
+	}
+
+	@Override
+	protected void onDraw(Canvas canvas) {
+		// Dibuja las puntuaciones en la pantalla.
+		canvas.drawText("Computer Score: " + Integer.toString(this.oppScore), 10,
+				this.whitePaint.getTextSize() + 10, this.whitePaint);
+		canvas.drawText("My Score: " + Integer.toString(this.myScore), 10, this.screenH
+				- this.whitePaint.getTextSize() - 10, this.whitePaint);
+		
+		// Dibuja la mano del adversario (el ordenador). Cartas del revés. En la
+		// esquina superior izquierda, debajo de la puntuación del oponente
+		for (int i = 0; i < this.oppHand.size(); i++) {
+			canvas.drawBitmap(this.cardBack, i * (this.scale * 5),
+					this.whitePaint.getTextSize() + (50 * scale), null);
+		}
+		
+		// Dibuja las cartas de la pila de descartadas en el centro de la pantalla
+		canvas.drawBitmap(this.cardBack, (this.screenW / 2) - this.cardBack.getWidth() - 10,
+				(this.screenH / 2) - (this.cardBack.getHeight() / 2), null);
+		if (!this.discardPile.isEmpty()) {
+			canvas.drawBitmap(this.discardPile.get(0).getBitmap(),
+					(this.screenW / 2) + 10, (this.screenH / 2)
+							- (this.cardBack.getHeight() / 2), null);
+		}
+		
+		// Dibuja las cartas de la mano del jugador. Si hay más de 7, dibuja boton ver mas cartas
+		if (this.myHand.size() > 7) { // Dibuja el botón de ver ciclo de cartas
+			canvas.drawBitmap(this.nextCardButton, this.screenW - 
+					this.nextCardButton.getWidth() - (30 * this.scale), this.screenH
+					- this.nextCardButton.getHeight() - this.scaledCardH
+					- (90 * this.scale), null);
+		}
+		// Dibuja mis cartas
+		for (int i = 0; i < this.myHand.size(); i++) {
+			// Si se está desplazando una carta, esta se pinta en una posicion especial
+			if (i == this.movingCardIdx) {
+				canvas.drawBitmap(this.myHand.get(i).getBitmap(), this.movingX, 
+						this.movingY,
+						null);
+			} else {
+				// Si la carta no se está moviendo, se pinta en su sitio parte inferior
+				// de la pantalla
+				if (i < 7) {
+					canvas.drawBitmap(this.myHand.get(i).getBitmap(), i
+							* (this.scaledCardW + 5), this.screenH - this.scaledCardH
+							- this.whitePaint.getTextSize() - (50 * this.scale), null);
+				}
+			}
+		}
+		invalidate();
+	}
+
+	public boolean onTouchEvent(MotionEvent event) {
+		int eventaction = event.getAction();
+		int X = (int) event.getX();
+		int Y = (int) event.getY();
+
+		switch (eventaction) {
+
+		case MotionEvent.ACTION_DOWN:
+			if (myTurn) {
+				for (int i = 0; i < 7; i++) {
+					if (X > i * (scaledCardW + 5)
+							&& X < i * (scaledCardW + 5) + scaledCardW
+							&& Y > screenH - scaledCardH
+									- whitePaint.getTextSize() - (50 * scale)) {
+						movingCardIdx = i;
+						movingX = X - (int) (30 * scale);
+						movingY = Y - (int) (70 * scale);
+					}
+				}
+			}
+			break;
+
+		case MotionEvent.ACTION_MOVE:
+			movingX = X - (int) (30 * scale);
+			movingY = Y - (int) (70 * scale);
+			break;
+
+		case MotionEvent.ACTION_UP:
+			if (movingCardIdx > -1
+					&& X > (screenW / 2) - (100 * scale)
+					&& X < (screenW / 2) + (100 * scale)
+					&& Y > (screenH / 2) - (100 * scale)
+					&& Y < (screenH / 2) + (100 * scale)
+					&& (myHand.get(movingCardIdx).getRank() == 8
+							|| myHand.get(movingCardIdx).getRank() == validRank || myHand
+							.get(movingCardIdx).getSuit() == validSuit)) {
+				validRank = myHand.get(movingCardIdx).getRank();
+				validSuit = myHand.get(movingCardIdx).getSuit();
+				discardPile.add(0, myHand.get(movingCardIdx));
+				myHand.remove(movingCardIdx);
+				if (myHand.isEmpty()) {
+					endHand();
+				} else {
+					if (validRank == 8) {
+						showChooseSuitDialog();
+					} else {
+						myTurn = false;
+						makeComputerPlay();
+					}
+				}
+			}
+			if (movingCardIdx == -1 && myTurn
+					&& X > (screenW / 2) - (100 * scale)
+					&& X < (screenW / 2) + (100 * scale)
+					&& Y > (screenH / 2) - (100 * scale)
+					&& Y < (screenH / 2) + (100 * scale)) {
+				if (checkForValidDraw()) {
+					drawCard(myHand);
+				} else {
+					Toast.makeText(myContext, "You have a valid play.",
+							Toast.LENGTH_SHORT).show();
+				}
+			}
+			if (myHand.size() > 7
+					&& X > screenW - nextCardButton.getWidth() - (30 * scale)
+					&& Y > screenH - nextCardButton.getHeight() - scaledCardH
+							- (90 * scale)
+					&& Y < screenH - nextCardButton.getHeight() - scaledCardH
+							- (60 * scale)) {
+				Collections.rotate(myHand, 1);
+			}
+			movingCardIdx = -1;
+			break;
+		}
+		invalidate();
+		return true;
+	}
+
+	private void showChooseSuitDialog() {
+		final Dialog chooseSuitDialog = new Dialog(myContext);
+		chooseSuitDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+		chooseSuitDialog.setContentView(R.layout.choose_suit_dialog);
+		final Spinner suitSpinner = (Spinner) chooseSuitDialog
+				.findViewById(R.id.suitSpinner);
+		ArrayAdapter<CharSequence> adapter = ArrayAdapter.createFromResource(
+				myContext, R.array.suits, android.R.layout.simple_spinner_item);
+		adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+		suitSpinner.setAdapter(adapter);
+		Button okButton = (Button) chooseSuitDialog.findViewById(R.id.okButton);
+		okButton.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View view) {
+				validSuit = (suitSpinner.getSelectedItemPosition() + 1) * 100;
+				String suitText = "";
+				if (validSuit == 100) {
+					suitText = "Diamonds";
+				} else if (validSuit == 200) {
+					suitText = "Clubs";
+				} else if (validSuit == 300) {
+					suitText = "Hearts";
+				} else if (validSuit == 400) {
+					suitText = "Spades";
+				}
+				chooseSuitDialog.dismiss();
+				Toast.makeText(myContext, "You chose " + suitText,
+						Toast.LENGTH_SHORT).show();
+				myTurn = false;
+				makeComputerPlay();
+			}
+		});
+		chooseSuitDialog.show();
+	}
+
+	private void initCards() {
+		for (int i = 0; i < 4; i++) {
+			for (int j = 102; j < 115; j++) {
+				int tempId = j + (i * 100);
+				Card tempCard = new Card(tempId);
+				int resourceId = super.getResources().getIdentifier(
+						"card" + tempId, "drawable", myContext.getPackageName());
+				Bitmap tempBitmap = BitmapFactory.decodeResource(
+						this.myContext.getResources(), resourceId);
+				this.scaledCardW = (int) (this.screenW / 8);
+				this.scaledCardH = (int) (this.scaledCardW * 1.28);
+				Bitmap scaledBitmap = Bitmap.createScaledBitmap(tempBitmap,
+						this.scaledCardW, this.scaledCardH, false);
+				tempCard.setBitmap(scaledBitmap);
+				this.deck.add(tempCard);
+			}
+		}
+	}
+
+	private void drawCard(List<Card> handToDraw) {
+		handToDraw.add(0, this.deck.get(0));
+		this.deck.remove(0);
+		if (this.deck.isEmpty()) {
+			for (int i = this.discardPile.size() - 1; i > 0; i--) {
+				this.deck.add(this.discardPile.get(i));
+				this.discardPile.remove(i);
+				Collections.shuffle(this.deck, new Random());
+			}
+		}
+	}
+
+	private void dealCards() {
+		// Baraja las cartas
+		Collections.shuffle(this.deck, new Random());
+		
+		// Reparte 7 cartas a cada jugador
+		for (int i = 0; i < 7; i++) {
+			this.drawCard(this.myHand);
+			this.drawCard(this.oppHand);
+		}
+	}
+
+	private boolean checkForValidDraw() {
+		boolean canDraw = true;
+		for (int i = 0; i < myHand.size(); i++) {
+			int tempId = myHand.get(i).getId();
+			int tempRank = myHand.get(i).getRank();
+			int tempSuit = myHand.get(i).getSuit();
+			if (validSuit == tempSuit || validRank == tempRank || tempId == 108
+					|| tempId == 208 || tempId == 308 || tempId == 408) {
+				canDraw = false;
+			}
+		}
+		return canDraw;
+	}
+
+	private void makeComputerPlay() {
+		int tempPlay = 0;
+		while (tempPlay == 0) {
+			tempPlay = computerPlayer.makePlay(oppHand, validSuit, validRank);
+			if (tempPlay == 0) {
+				drawCard(oppHand);
+			}
+		}
+		if (tempPlay == 108 || tempPlay == 208 || tempPlay == 308
+				|| tempPlay == 408) {
+			validRank = 8;
+			validSuit = computerPlayer.chooseSuit(oppHand);
+			String suitText = "";
+			if (validSuit == 100) {
+				suitText = "Diamonds";
+			} else if (validSuit == 200) {
+				suitText = "Clubs";
+			} else if (validSuit == 300) {
+				suitText = "Hearts";
+			} else if (validSuit == 400) {
+				suitText = "Spades";
+			}
+			Toast.makeText(myContext, "Computer chose " + suitText,
+					Toast.LENGTH_SHORT).show();
+		} else {
+			validSuit = Math.round((tempPlay / 100) * 100);
+			validRank = tempPlay - validSuit;
+		}
+		for (int i = 0; i < oppHand.size(); i++) {
+			Card tempCard = oppHand.get(i);
+			if (tempPlay == tempCard.getId()) {
+				discardPile.add(0, oppHand.get(i));
+				oppHand.remove(i);
+			}
+		}
+		if (oppHand.isEmpty()) {
+			endHand();
+		}
+		myTurn = true;
+	}
+
+	private void endHand() {
+		final Dialog endHandDialog = new Dialog(myContext);
+		endHandDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+		endHandDialog.setContentView(R.layout.end_hand_dialog);
+		updateScores();
+		TextView endHandText = (TextView) endHandDialog
+				.findViewById(R.id.endHandText);
+		if (myHand.isEmpty()) {
+			if (myScore >= 300) {
+				endHandText.setText("You reached " + myScore
+						+ " points. You won! Would you like to play again?");
+			} else {
+				endHandText.setText("You went out and got " + scoreThisHand
+						+ " points!");
+			}
+		} else if (oppHand.isEmpty()) {
+			if (oppScore >= 300) {
+				endHandText
+						.setText("The computer reached "
+								+ oppScore
+								+ " points. Sorry, you lost. Would you like to play again?");
+			} else {
+				endHandText.setText("The computer went out and got "
+						+ scoreThisHand + " points.");
+			}
+		}
+		Button nextHandButton = (Button) endHandDialog
+				.findViewById(R.id.nextHandButton);
+		if (oppScore >= 300 || myScore >= 300) {
+			nextHandButton.setText("New Game");
+		}
+		nextHandButton.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View view) {
+				if (oppScore >= 300 || myScore >= 300) {
+					myScore = 0;
+					oppScore = 0;
+				}
+				initNewHand();
+				endHandDialog.dismiss();
+			}
+		});
+		endHandDialog.show();
+	}
+
+	private void updateScores() {
+		for (int i = 0; i < myHand.size(); i++) {
+			oppScore += myHand.get(i).getScoreValue();
+			scoreThisHand += myHand.get(i).getScoreValue();
+		}
+		for (int i = 0; i < oppHand.size(); i++) {
+			myScore += oppHand.get(i).getScoreValue();
+			scoreThisHand += oppHand.get(i).getScoreValue();
+		}
+	}
+
+	private void initNewHand() {
+		scoreThisHand = 0;
+		if (myHand.isEmpty()) {
+			myTurn = true;
+		} else if (oppHand.isEmpty()) {
+			myTurn = false;
+		}
+		deck.addAll(discardPile);
+		deck.addAll(myHand);
+		deck.addAll(oppHand);
+		discardPile.clear();
+		myHand.clear();
+		oppHand.clear();
+		dealCards();
+		drawCard(discardPile);
+		validSuit = discardPile.get(0).getSuit();
+		validRank = discardPile.get(0).getRank();
+		if (!myTurn) {
+			makeComputerPlay();
+		}
+	}
+}
